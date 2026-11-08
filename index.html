@@ -1,0 +1,601 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>バーチャルのバナナですべってころんで</title>
+<meta property="og:type" content="website">
+<meta property="og:title" content="バーチャルのバナナですべってころんで">
+<meta property="og:description" content="バナナの皮でみんなを転ばせろ!30秒タイムアタック。連鎖でキャラが増える!">
+<meta property="og:url" content="https://virtualbanana877.github.io/SlippingOnBananas/">
+<meta property="og:image" content="https://virtualbanana877.github.io/SlippingOnBananas/ogp.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:image" content="https://virtualbanana877.github.io/SlippingOnBananas/ogp.png">
+<style>
+:root{
+  box-sizing:border-box;
+  padding-top:env(safe-area-inset-top,0px);
+  padding-bottom:env(safe-area-inset-bottom,0px);
+  --bg:#fff8dc; --fg:#3b2f10; --panel:#ffffff; --accent:#f5b800; --line:#e3cf8a;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){ --bg:#1f1b10; --fg:#fbf1c9; --panel:#2c2616; --accent:#f5b800; --line:#5a4d1f; }
+}
+:root[data-theme="dark"]{ --bg:#1f1b10; --fg:#fbf1c9; --panel:#2c2616; --accent:#f5b800; --line:#5a4d1f; }
+html,body{margin:0;background:var(--bg);color:var(--fg);font-family:"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;}
+body{display:flex;flex-direction:column;align-items:center;padding:8px;}
+h1{font-size:16px;margin:2px 0 6px;text-align:center;}
+/* 画面上部のスコア・時間表示 */
+#hud{width:100%;max-width:360px;display:flex;flex-wrap:wrap;gap:2px 8px;justify-content:space-between;align-items:center;
+  background:var(--panel);border:2px solid var(--line);border-radius:10px;padding:6px 12px;margin-bottom:8px;box-sizing:border-box;font-weight:bold;font-size:15px;}
+#hud > div:last-child{width:100%;text-align:right}
+#hud small{font-weight:normal;opacity:.7;font-size:13px;}
+#combo{color:#e0602a;min-width:90px;text-align:center}
+#wrap{position:relative;width:100%;max-width:360px;border:3px solid var(--line);border-radius:10px;box-sizing:border-box;overflow:hidden}
+canvas{display:block;width:100%;height:auto;touch-action:none;background:#14123a}
+.overlay{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;
+  background:rgba(30,20,0,.62);color:#fff;border-radius:10px;text-align:center}
+.overlay.hidden{display:none}
+.overlay h2{margin:0;font-size:18px}
+.overlay p{margin:0;font-size:14px;line-height:1.6}
+button{font:inherit;font-weight:bold;font-size:18px;padding:10px 28px;border:0;border-radius:999px;background:var(--accent);color:#3b2f10;cursor:pointer}
+button:hover{filter:brightness(1.08)}
+#popBadge{position:absolute;top:6px;right:8px;pointer-events:none;background:rgba(0,0,0,.55);color:#fff;font-weight:bold;font-size:14px;padding:3px 10px;border-radius:999px;transform-origin:right top}
+#popBadge.bump{animation:bump .45s}
+@keyframes bump{0%{transform:scale(1)}40%{transform:scale(1.5)}100%{transform:scale(1)}}
+.xbtn{display:inline-block;font-weight:bold;font-size:16px;padding:9px 24px;border-radius:999px;background:#000;color:#fff;text-decoration:none}
+</style>
+</head>
+<body>
+<h1>🍌 バーチャルのバナナですべってころんで</h1>
+<div id="hud">
+  <div>スコア <span id="score">0</span></div>
+  <div id="combo"></div>
+  <div>残り <span id="time">30</span>秒</div>
+  <div><small>ハイスコア <span id="hi">0</span></small></div>
+</div>
+<div id="wrap">
+  <canvas id="c" width="360" height="480"></canvas>
+  <div id="popBadge">👥 <span id="popNum">10</span>人</div>
+  <div id="start" class="overlay">
+    <div style="font-size:52px;line-height:1">🍌</div>
+    <h2>バーチャルのバナナですべってころんで</h2>
+    <p>タップでバナナの皮を設置(最大5個)<br>キャラが踏んで転んだら +10点<br>3秒以内の連続でコンボ!<br>10コンボで仲間が増える!<br>(10人増えるごとに必要コンボ+1)</p>
+    <button id="startBtn">スタート</button>
+  </div>
+  <div id="end" class="overlay hidden">
+    <h2>タイムアップ!</h2>
+    <p>スコア: <b id="finalScore">0</b><br><span id="newRecord"></span>ハイスコア: <span id="finalHi">0</span></p>
+    <button id="retryBtn">もう一度遊ぶ</button>
+    <a id="shareBtn" class="xbtn" href="#" target="_blank" rel="noopener">Xでポスト</a>
+  </div>
+</div>
+
+<script>
+// ===== 設定 =====
+const W = 360, H = 480;       // スマホ縦持ち向けの小さめステージ(表示は画面幅に合わせて拡縮)
+const CHAR_COUNT = 10;         // キャラ人数
+const CHAR_R = 25;             // キャラ半径
+const WALK_SPEED = 50;         // 歩行速度(px/秒・控えめ)
+const SLIP_SPEED = 300;        // 滑り初速(px/秒)
+const SLIP_TIME = 1.5;         // 滑り時間(秒)
+const PEEL_R = 22.5;             // バナナの皮の当たり半径
+const MAX_PEELS = 5;           // 同時設置数
+const GAME_TIME = 30;          // 制限時間(秒)
+const BONUS_COMBO = 10;         // 最初にキャラが1人増えるのに必要なコンボ数
+const BONUS_STEP = 1;           // 10人増えるごとに、必要なコンボ数が増える量
+const MAX_CHARS = 100;           // キャラ数の上限
+const GAME_URL = 'https://virtualbanana877.github.io/SlippingOnBananas/';   // 公開URL(XポストにこのURLが入る)
+const SHARE_TITLE = 'バーチャルのバナナですべってころんで';   // Xポストのタイトル兼ハッシュタグ
+const COMBO_WINDOW = 3;        // コンボ猶予(秒)
+const HI_KEY = 'bananaSlipHi';
+const COLORS = ['#ff7a8a', '#6ec6ff', '#8be28b', '#c79bff', '#ffb067',
+                '#ff9ad5', '#7fe3d4', '#d4e66b', '#9aa8ff', '#ff8f6b'];
+
+const cv = document.getElementById('c');
+const ctx = cv.getContext('2d');
+const $ = id => document.getElementById(id);
+
+// ===== 効果音(Web Audioで合成。外部ファイル不要) =====
+let audioCtx = null;
+function initAudio(){
+  // ブラウザの仕様上、クリック操作の中で作成・再開する
+  try {
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+  } catch(e){ audioCtx = null; }
+}
+// 効果音の共通部品:周波数・開始までの遅れ・長さ・波形・音量
+function beep(freq, delay, dur, type, vol){
+  if (!audioCtx) return;
+  try {
+    const t = audioCtx.currentTime + delay;
+    const o = audioCtx.createOscillator(), g = audioCtx.createGain();
+    o.type = type; o.frequency.setValueAtTime(freq, t);
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(vol, t + 0.015);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    o.connect(g); g.connect(audioCtx.destination);
+    o.start(t); o.stop(t + dur + 0.02);
+  } catch(e){}
+}
+// 1人増えた時:キラキラ上がる「ピロリロリン♪」
+function playSpawn(){
+  [523.25, 659.25, 783.99, 1046.5, 1318.5].forEach((f, i) => beep(f, i * 0.07, 0.22, 'triangle', 0.16));
+  beep(2093, 0.35, 0.3, 'sine', 0.08);          // 最後にキラッ
+}
+// 10人増えるごと:派手なファンファーレ
+function playFanfare(){
+  [523.25, 659.25, 783.99, 1046.5, 783.99, 1046.5, 1318.5, 1568].forEach((f, i) => beep(f, i * 0.09, 0.2, 'square', 0.1));
+  [1046.5, 1318.5, 1568, 2093].forEach(f => beep(f, 0.8, 0.9, 'triangle', 0.12));   // ジャーン
+  beep(261.63, 0.8, 0.9, 'sawtooth', 0.07);     // 低音で厚みを足す
+}
+// 滑った時の効果音:「ぴゅーっ」と下がる音 + 「ぼよん」
+function playSlip(){
+  if (!audioCtx) return;
+  try {
+    const t = audioCtx.currentTime;
+    const tone = (type, f0, f1, dur, vol, delay) => {
+      const o = audioCtx.createOscillator(), g = audioCtx.createGain();
+      o.type = type;
+      o.frequency.setValueAtTime(f0, t + delay);
+      o.frequency.exponentialRampToValueAtTime(f1, t + delay + dur);
+      g.gain.setValueAtTime(0.0001, t + delay);
+      g.gain.exponentialRampToValueAtTime(vol, t + delay + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + delay + dur);
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(t + delay); o.stop(t + delay + dur + 0.02);
+    };
+    tone('triangle', 1100, 260, 0.35, 0.18, 0);      // ぴゅーっ
+    tone('sine', 180, 90, 0.18, 0.22, 0.3);          // ぼよん
+  } catch(e){}
+}
+
+// ===== ハイスコア(localStorageは失敗しうるのでtry/catch) =====
+function loadHi(){ try { return parseInt(localStorage.getItem(HI_KEY)) || 0; } catch(e){ return 0; } }
+function saveHi(v){ try { localStorage.setItem(HI_KEY, String(v)); } catch(e){} }
+let hiScore = loadHi();
+$('hi').textContent = hiScore;
+
+// ===== ゲーム状態 =====
+let chars = [], peels = [], popups = [];
+let particles = [], ripples = [], shake = 0, flash = 0, bigText = null, maxCombo = 0;
+let bonusProgress = 0, spawnCount = 0;   // キャラ追加用:今のコンボ内の進み具合 / これまでに増えた人数   // 演出用
+let score = 0, timeLeft = GAME_TIME, running = false;
+let comboCount = 0, lastFallTime = -99, clock = 0;   // clock: ゲーム内経過秒
+let last = 0;
+
+function rand(a, b){ return a + Math.random() * (b - a); }
+
+// キャラ生成
+function makeChars(){
+  chars = [];
+  for (let i = 0; i < CHAR_COUNT; i++){
+    chars.push({
+      x: rand(60, W - 60), y: rand(60, H - 60),
+      angle: rand(0, Math.PI * 2),
+      id: i, phase: rand(0, 6.28),
+      color: COLORS[i % COLORS.length],
+      turnTimer: rand(1, 3),   // 次に気まぐれで向きを変えるまで
+      slip: null               // 滑り中は {t, dx, dy}
+    });
+  }
+}
+
+function startGame(){
+  initAudio();
+  makeChars();
+  peels = []; popups = [];
+  particles = []; ripples = []; shake = 0; flash = 0; bigText = null;
+  score = 0; timeLeft = GAME_TIME; comboCount = 0; lastFallTime = -99; clock = 0; maxCombo = 0; bonusProgress = 0; spawnCount = 0;
+  running = true;
+  $('start').classList.add('hidden');
+  $('end').classList.add('hidden');
+  updateHud();
+}
+
+function endGame(){
+  running = false;
+  particles = []; ripples = []; shake = 0; flash = 0; bigText = null;
+  const isNew = score > hiScore;
+  if (isNew){ hiScore = score; saveHi(hiScore); }
+  $('finalScore').textContent = score;
+  $('finalHi').textContent = hiScore;
+  $('newRecord').textContent = isNew ? '🎉 新記録! ' : '';
+  $('hi').textContent = hiScore;
+  // Xへのポスト(スコア・最大コンボ・キャラ数+このページのURL)
+  const text = '🍌' + SHARE_TITLE + '🍌\nスコア ' + score + '点!(最大コンボ ' + maxCombo + '、キャラ' + chars.length + '人)';
+  $('shareBtn').href = 'https://twitter.com/intent/tweet?text=' + encodeURIComponent(text)
+    + '&url=' + encodeURIComponent(GAME_URL)
+    + '&hashtags=' + encodeURIComponent(SHARE_TITLE);
+  $('end').classList.remove('hidden');
+}
+
+// ===== 入力:クリック位置に皮を設置 =====
+cv.addEventListener('pointerdown', e => {   // タッチ・マウス両対応
+  e.preventDefault();
+  if (!running) return;
+  const r = cv.getBoundingClientRect();
+  const x = (e.clientX - r.left) * (W / r.width);
+  const y = (e.clientY - r.top) * (H / r.height);
+  peels.push({ x, y, rot: rand(0, Math.PI * 2) });
+  if (peels.length > MAX_PEELS) peels.shift();   // 5個目で一番古いものを消す
+});
+$('startBtn').onclick = startGame;
+$('retryBtn').onclick = startGame;
+
+// ===== 更新処理 =====
+function update(dt){
+  clock += dt;
+  timeLeft -= dt;
+  if (timeLeft <= 0){ timeLeft = 0; updateHud(); endGame(); return; }
+
+  for (const c of chars){
+    if (c.slip){
+      // 滑り中:だんだん減速、壁で跳ね返る
+      const s = c.slip;
+      s.t += dt;
+      const sp = SLIP_SPEED * Math.max(0, 1 - s.t / SLIP_TIME);
+      c.x += s.dx * sp * dt;
+      c.y += s.dy * sp * dt;
+      c.spin = (c.spin || 0) + (sp / SLIP_SPEED) * 18 * dt;
+      if (c.x < CHAR_R){ c.x = CHAR_R; s.dx = Math.abs(s.dx); }
+      if (c.x > W - CHAR_R){ c.x = W - CHAR_R; s.dx = -Math.abs(s.dx); }
+      if (c.y < CHAR_R){ c.y = CHAR_R; s.dy = Math.abs(s.dy); }
+      if (c.y > H - CHAR_R){ c.y = H - CHAR_R; s.dy = -Math.abs(s.dy); }
+      if (s.t >= SLIP_TIME){
+        c.angle = Math.atan2(s.dy, s.dx);   // 普通の歩行に復帰
+        c.slip = null; c.spin = 0;
+      }
+      continue;
+    }
+
+    // 通常歩行:ときどき向きを変える
+    c.turnTimer -= dt;
+    if (c.turnTimer <= 0){ c.angle += rand(-1.2, 1.2); c.turnTimer = rand(1, 3); }
+    let vx = Math.cos(c.angle) * WALK_SPEED, vy = Math.sin(c.angle) * WALK_SPEED;
+    c.x += vx * dt; c.y += vy * dt;
+    // 壁に当たったら方向転換
+    let bounced = false;
+    if (c.x < CHAR_R){ c.x = CHAR_R; vx = Math.abs(vx); bounced = true; }
+    if (c.x > W - CHAR_R){ c.x = W - CHAR_R; vx = -Math.abs(vx); bounced = true; }
+    if (c.y < CHAR_R){ c.y = CHAR_R; vy = Math.abs(vy); bounced = true; }
+    if (c.y > H - CHAR_R){ c.y = H - CHAR_R; vy = -Math.abs(vy); bounced = true; }
+    if (bounced) c.angle = Math.atan2(vy, vx);
+
+    // 滑り判定:皮に触れた瞬間、その時の進行方向へ滑る
+    for (const p of peels){
+      if (Math.hypot(c.x - p.x, c.y - p.y) < CHAR_R + PEEL_R){
+        c.slip = { t: 0, dx: Math.cos(c.angle), dy: Math.sin(c.angle) };
+        onFall(c);
+        break;
+      }
+    }
+  }
+
+  // 連鎖:滑っているキャラが歩いているキャラにぶつかると、そのキャラも同じ方向へ転ぶ
+  for (const a of chars){
+    if (!a.slip || a.slip.t > SLIP_TIME * 0.8) continue;
+    for (const b of chars){
+      if (b === a || b.slip) continue;
+      if (Math.hypot(a.x - b.x, a.y - b.y) < CHAR_R * 2){
+        b.slip = { t: 0, dx: a.slip.dx, dy: a.slip.dy };
+        onFall(b, true);
+      }
+    }
+  }
+
+  // 演出の更新
+  for (const c of chars){ if (c.spawnT !== undefined && c.spawnT < 0.5) c.spawnT += dt; }   // 登場アニメ
+  shake = Math.max(0, shake - 30 * dt);
+  flash = Math.max(0, flash - 1.2 * dt);
+  if (bigText){ bigText.t += dt; if (bigText.t > 0.9) bigText = null; }
+  for (const p of particles){ p.t += dt; p.x += p.vx * dt; p.y += p.vy * dt; p.vy += 400 * dt; }
+  particles = particles.filter(p => p.t < p.life);
+  for (const r of ripples) r.t += dt;
+  ripples = ripples.filter(r => r.t < 1.2);
+
+  // ポップアップ文字
+  for (const p of popups){ p.t += dt; p.y -= 30 * dt; }
+  popups = popups.filter(p => p.t < 1);
+  updateHud();
+}
+
+// 転ばせた時のスコア処理(コンボ:3秒以内の連続で ×1.5, ×2, ×2.5…)
+function onFall(c, chain){
+  const continued = clock - lastFallTime <= COMBO_WINDOW;   // コンボ継続中か
+  comboCount = continued ? comboCount + 1 : 1;
+  bonusProgress = continued ? bonusProgress + 1 : 1;
+  lastFallTime = clock;
+  const mult = 1 + 0.5 * (comboCount - 1);
+  const pts = Math.round(10 * mult);
+  playSlip();
+  score += pts;
+  popups.push({ x: c.x, y: c.y - CHAR_R, t: 0, text: (chain ? '連鎖! ' : '') + '+' + pts + (comboCount > 1 ? ' ×' + mult : '') });
+
+  // ===== 演出:転ぶたびに紙吹雪・シェイク、コンボでフラッシュ+大きな文字 =====
+  burst(c.x, c.y, 8 + comboCount * 4);
+  ripples.push({ x: c.x, y: c.y, t: 0 });          // 背景に波紋
+  maxCombo = Math.max(maxCombo, comboCount);
+  shake = Math.min(12, 3 + comboCount * 2);
+  flash = comboCount > 1 ? Math.min(0.5, 0.15 + comboCount * 0.05) : 0;
+  if (comboCount >= 2){
+    const tier = comboCount >= 6 ? 'AMAZING!!!' : comboCount >= 4 ? 'GREAT!!' : 'NICE!';
+    bigText = { t: 0, tier: tier, sub: 'COMBO ×' + mult };
+  }
+  // コンボボーナス:必要コンボ数に達するとキャラが1人増える(最初は10、10人増えるごとに+5)
+  const need = BONUS_COMBO + BONUS_STEP * Math.floor(spawnCount / 10);   // 10人増えるごとに+5
+  if (bonusProgress >= need && chars.length < MAX_CHARS){
+    bonusProgress = 0; spawnCount++;
+    spawnChar();
+    if (spawnCount % 10 === 0){                // 10人増えるごと:さらに特別な演出とファンファーレ
+      playFanfare();
+      bigText = { t: 0, tier: spawnCount + '人増えた!!', sub: 'BONUS!!' };
+      flash = 0.9; shake = 14; burst(W / 2, H / 2, 60);
+    } else {                                   // 1人増えるごと:特別な効果音
+      playSpawn();
+      bigText = { t: 0, tier: '仲間が増えた!', sub: 'キャラ +1' };
+      flash = 0.6;
+    }
+  }
+  try { if (navigator.vibrate) navigator.vibrate(comboCount > 1 ? [30, 20, 30] : 25); } catch(e){}
+}
+
+// 紙吹雪を飛ばす
+function burst(x, y, n){
+  const cols = ['#ffe135', '#ff7a8a', '#6ec6ff', '#8be28b', '#ffffff'];
+  for (let i = 0; i < n; i++){
+    const a = rand(0, Math.PI * 2), s = rand(80, 260);
+    particles.push({ x: x, y: y, vx: Math.cos(a) * s, vy: Math.sin(a) * s - 80,
+      t: 0, life: rand(0.5, 0.9), color: cols[i % cols.length], size: rand(3, 6) });
+  }
+}
+
+// キャラを1人追加(ポンッと弾むように登場+紙吹雪+波紋+「NEW!」)
+function spawnChar(){
+  let x = W / 2, y = H / 2;
+  for (let i = 0; i < 20; i++){            // 他のキャラから離れた位置を探す
+    x = rand(50, W - 50); y = rand(50, H - 50);
+    if (chars.every(o => Math.hypot(o.x - x, o.y - y) > 70)) break;
+  }
+  const i = chars.length;
+  chars.push({ x: x, y: y, angle: rand(0, Math.PI * 2), color: COLORS[i % COLORS.length],
+    id: i, phase: rand(0, 6.28), turnTimer: rand(1, 3), slip: null, spawnT: 0 });
+  burst(x, y, 30);
+  const badge = $('popBadge'); badge.classList.remove('bump'); void badge.offsetWidth; badge.classList.add('bump');
+  ripples.push({ x: x, y: y, t: 0 });
+  popups.push({ x: x, y: y - CHAR_R * 1.5, t: 0, text: 'NEW!' });
+}
+
+function updateHud(){
+  $('score').textContent = score;
+  $('time').textContent = Math.ceil(timeLeft);
+  $('popNum').textContent = chars.length;   // 現在のキャラ人数(右上)
+  const active = running && comboCount > 1 && clock - lastFallTime <= COMBO_WINDOW;
+  $('combo').textContent = active ? 'COMBO ×' + (1 + 0.5 * (comboCount - 1)) : '';
+}
+
+// ===== 描画 =====
+// 背景:ディスコ床(色が流れるタイル+ネオングリッド+スポットライト)
+// コンボが増えるほど明るく派手に、転んだ場所から波紋が広がる。コンボ6以上でレインボーのフィーバー
+function drawFloor(){
+  const s = 40;
+  const hot = running && clock - lastFallTime <= COMBO_WINDOW ? comboCount : 0;   // 今のコンボ数
+  const fever = hot >= 6;
+  const speed = fever ? 240 : 40 + hot * 15;     // 色の流れる速さ
+  const baseL = 20 + Math.min(hot, 8) * 2.5;     // 明るさ
+  for (let y = 0; y < H; y += s)
+    for (let x = 0; x < W; x += s){
+      const cx = x + s / 2, cy = y + s / 2;
+      const hue = (x * 0.5 + y * 0.35 + clock * speed) % 360;
+      let L = baseL + (((x + y) / s) % 2 ? 5 : 0) + Math.sin(clock * 3 + x * 0.05 + y * 0.07) * 3;
+      for (const r of ripples){                  // 波紋のリング付近のタイルを光らせる
+        const d = Math.abs(Math.hypot(cx - r.x, cy - r.y) - r.t * 420);
+        if (d < 40) L += (1 - d / 40) * 40 * (1 - r.t / 1.2);
+      }
+      ctx.fillStyle = 'hsl(' + hue + ',85%,' + Math.min(L, 80) + '%)';
+      ctx.fillRect(x, y, s, s);
+    }
+  // ネオングリッド
+  ctx.lineWidth = 1.5; ctx.strokeStyle = 'rgba(120,255,255,.35)';
+  ctx.beginPath();
+  for (let x = 0; x <= W; x += s){ ctx.moveTo(x, 0); ctx.lineTo(x, H); }
+  for (let y = 0; y <= H; y += s){ ctx.moveTo(0, y); ctx.lineTo(W, y); }
+  ctx.stroke();
+  // スポットライト(3つがふわふわ動く)
+  ctx.globalCompositeOperation = 'lighter';
+  for (let i = 0; i < 3; i++){
+    const lx = W / 2 + Math.sin(clock * (0.7 + i * 0.4) + i * 2) * W * 0.4;
+    const ly = H / 2 + Math.cos(clock * (0.5 + i * 0.3) + i) * H * 0.4;
+    const g = ctx.createRadialGradient(lx, ly, 0, lx, ly, 110);
+    g.addColorStop(0, 'rgba(255,255,255,.28)'); g.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+  }
+  ctx.globalCompositeOperation = 'source-over';
+}
+
+function drawPeel(p){
+  ctx.save();
+  ctx.translate(p.x, p.y); ctx.rotate(p.rot); ctx.scale(1.8, 1.8);   // 見た目を大きく(当たりも広め)
+  ctx.fillStyle = '#ffe135'; ctx.strokeStyle = '#8a6d00'; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.ellipse(0, 0, 14, 7, 0, 0, Math.PI * 2); ctx.fill();
+  // 外枠は点線にしてバーチャル感を出す
+  ctx.setLineDash([3, 3]); ctx.stroke();
+  // 皮の切れ込み(これも点線)
+  ctx.beginPath(); ctx.moveTo(-14, 0); ctx.lineTo(14, 0); ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.fillStyle = '#5a3d00'; ctx.fillRect(13, -2, 4, 4);
+  ctx.restore();
+}
+
+// キャラ描画:滑稽なデザイン(ギョロ目・ヘラヘラ口・小物・ぴょこぴょこ歩き)
+function drawChar(c){
+  const R = 22, u = CHAR_R / R;              // 基準半径22で描いて、CHAR_Rに合わせて拡縮
+  const slipping = !!c.slip;
+  const dir = slipping ? Math.atan2(c.slip.dy, c.slip.dx) : c.angle;
+  const wt = clock * 10 + c.phase;            // 歩行アニメ用の時間
+  const dark = 'rgba(0,0,0,.5)';
+  ctx.save();
+  ctx.translate(c.x, c.y); ctx.scale(u, u);
+  if (c.spawnT !== undefined && c.spawnT < 0.5){
+    const t = c.spawnT / 0.5 - 1, k = 1 + 2.70158 * t * t * t + 1.70158 * t * t;
+    ctx.scale(k, k);
+  }
+  // 影
+  ctx.fillStyle = 'rgba(0,0,0,.18)';
+  ctx.beginPath(); ctx.ellipse(0, R * 0.8, R * 0.95, R * 0.35, 0, 0, Math.PI * 2); ctx.fill();
+  // 体の動き:歩行中はぴょこぴょこ+ゆらゆら、滑り中はくるくる回る
+  if (slipping) ctx.rotate(c.spin || 0);
+  else { ctx.translate(0, -Math.abs(Math.sin(wt)) * 3); ctx.rotate(Math.sin(wt) * 0.12); }
+  const sq = slipping ? 0 : Math.sin(wt * 2) * 0.05;   // つぶれ・伸び
+  ctx.scale(1 - sq, 1 + sq);
+  ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+
+  // 手と足(体の後ろ)
+  const limb = (x0, y0, x1, y1, col, w) => {
+    ctx.strokeStyle = dark; ctx.lineWidth = w + 3;
+    ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
+    ctx.strokeStyle = col; ctx.lineWidth = w;
+    ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
+  };
+  for (const s of [-1, 1]){
+    const ph = s > 0 ? Math.PI : 0;
+    // 手:歩行中は振る、滑り中はバンザイでバタバタ
+    const ay = slipping ? -12 + Math.sin(clock * 30 + s) * 5 : 4 + Math.sin(wt + ph) * 7;
+    limb(s * (R - 2), 3, s * (R + 9), ay, c.color, 5);
+    // 足:歩行中は交互に上がる、滑り中は宙でバタバタ
+    const lift = slipping ? Math.sin(clock * 30 + s * 2) * 4 : Math.max(0, Math.sin(wt + ph)) * 5;
+    ctx.fillStyle = '#ff9a3c'; ctx.strokeStyle = dark; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.ellipse(s * 9, R - 1 - lift, 8, 5, 0, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+  }
+
+  // 体
+  ctx.fillStyle = c.color; ctx.strokeStyle = dark; ctx.lineWidth = 2.5;
+  ctx.beginPath(); ctx.arc(0, 0, R, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+  // ほっぺ
+  ctx.fillStyle = 'rgba(255,90,120,.45)';
+  ctx.beginPath(); ctx.arc(-14, 8, 4.5, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.arc(14, 8, 4.5, 0, Math.PI * 2); ctx.fill();
+
+  // 顔(歩行中は進行方向にちょっと寄る)
+  ctx.save();
+  if (!slipping) ctx.translate(Math.cos(dir) * 3, Math.sin(dir) * 2.5);
+  // ギョロ目(左右で大きさが違う)
+  for (const [ex, ey, er] of [[-8, -5, 8], [8.5, -4, 6]]){
+    ctx.fillStyle = '#fff'; ctx.strokeStyle = '#222'; ctx.lineWidth = 1.8;
+    ctx.beginPath(); ctx.arc(ex, ey, er, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+    if (slipping){
+      // ぐるぐる目
+      ctx.beginPath();
+      for (let a = 0; a <= 18; a += 0.5){
+        const rr = er * 0.85 * a / 18, ang = a + clock * 20;
+        const px = ex + Math.cos(ang) * rr, py = ey + Math.sin(ang) * rr;
+        if (a === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+      }
+      ctx.stroke();
+    } else {
+      // 黒目はキョロキョロ
+      const lx = Math.cos(dir) * er * 0.35 + Math.sin(wt * 0.7 + ex) * er * 0.2;
+      const ly = Math.sin(dir) * er * 0.35 + Math.cos(wt * 0.9 + ex) * er * 0.2;
+      ctx.fillStyle = '#222';
+      ctx.beginPath(); ctx.arc(ex + lx, ey + ly, er * 0.42, 0, Math.PI * 2); ctx.fill();
+    }
+  }
+  // 口
+  ctx.fillStyle = '#5a1020'; ctx.strokeStyle = '#222'; ctx.lineWidth = 2;
+  if (slipping){
+    // 絶叫
+    ctx.beginPath(); ctx.ellipse(0, 11, 6, 8, 0, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = '#ff7a95';
+    ctx.beginPath(); ctx.ellipse(0, 15, 3.5, 3, 0, 0, Math.PI * 2); ctx.fill();
+  } else {
+    // ヘラヘラ口+ベロ
+    const mw = 7 + Math.sin(wt) * 1.2;
+    ctx.beginPath(); ctx.arc(0, 7, mw, 0, Math.PI); ctx.closePath(); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = '#ff7a95';
+    ctx.beginPath(); ctx.ellipse(2, 12.5, 3.5, 2.5, 0, 0, Math.PI * 2); ctx.fill();
+  }
+  // 小物(キャラごとに5種類:アホ毛・ちょびヒゲ・赤っ鼻・シルクハット・出っ歯)
+  const st = (c.id || 0) % 5;
+  ctx.strokeStyle = '#222'; ctx.lineWidth = 2;
+  if (st === 0){
+    ctx.beginPath(); ctx.moveTo(0, -R + 1); ctx.quadraticCurveTo(-6, -R - 10, 3, -R - 15); ctx.stroke();
+    ctx.fillStyle = '#222'; ctx.beginPath(); ctx.arc(3, -R - 15, 2.5, 0, Math.PI * 2); ctx.fill();
+  } else if (st === 1){
+    ctx.fillStyle = '#3a2410';
+    for (const s of [-1, 1]){
+      ctx.save(); ctx.translate(s * 6, 4); ctx.rotate(s * 0.4);
+      ctx.beginPath(); ctx.ellipse(0, 0, 6, 2.5, 0, 0, Math.PI * 2); ctx.fill(); ctx.restore();
+    }
+  } else if (st === 2){
+    ctx.fillStyle = '#ff3b3b'; ctx.beginPath(); ctx.arc(0, 3, 4.5, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+  } else if (st === 3){
+    ctx.fillStyle = '#2b2b3a'; ctx.fillRect(-9, -R - 9, 18, 12); ctx.fillRect(-14, -R + 1, 28, 4);
+    ctx.fillStyle = '#d84a4a'; ctx.fillRect(-9, -R - 1, 18, 3);
+  } else {
+    ctx.fillStyle = '#fff'; ctx.lineWidth = 1.5;
+    ctx.fillRect(-4, 7, 4, 6); ctx.strokeRect(-4, 7, 4, 6);
+    ctx.fillRect(0, 7, 4, 6); ctx.strokeRect(0, 7, 4, 6);
+  }
+  ctx.restore();   // 顔
+  ctx.restore();
+}
+
+function draw(){
+  ctx.save();
+  if (shake > 0) ctx.translate(rand(-shake, shake), rand(-shake, shake));   // 画面シェイク
+  drawFloor();
+  peels.forEach(drawPeel);
+  chars.forEach(drawChar);
+  ctx.font = 'bold 16px sans-serif'; ctx.textAlign = 'center';
+  for (const p of popups){
+    ctx.globalAlpha = 1 - p.t;
+    ctx.lineWidth = 4; ctx.strokeStyle = '#fff'; ctx.strokeText(p.text, p.x, p.y);
+    ctx.fillStyle = '#e0402a'; ctx.fillText(p.text, p.x, p.y);
+  }
+  ctx.globalAlpha = 1;
+  // パーティクル(紙吹雪)
+  for (const p of particles){
+    ctx.globalAlpha = 1 - p.t / p.life;
+    ctx.fillStyle = p.color; ctx.fillRect(p.x, p.y, p.size, p.size);
+  }
+  ctx.globalAlpha = 1;
+  ctx.restore();
+  // 画面フラッシュ
+  if (flash > 0){ ctx.fillStyle = 'rgba(255,240,150,' + flash + ')'; ctx.fillRect(0, 0, W, H); }
+  // コンボ演出の大きな文字(ポップして消える)
+  if (bigText){
+    const k = bigText.t / 0.9;
+    const pop = 1 + 0.6 * Math.max(0, 1 - bigText.t / 0.18);
+    ctx.save();
+    ctx.translate(W / 2, H * 0.32); ctx.scale(pop, pop);
+    ctx.globalAlpha = k < 0.6 ? 1 : 1 - (k - 0.6) / 0.4;
+    ctx.textAlign = 'center'; ctx.lineJoin = 'round'; ctx.lineWidth = 7; ctx.strokeStyle = '#fff';
+    ctx.font = 'bold 44px sans-serif'; ctx.strokeText(bigText.tier, 0, 0);
+    ctx.fillStyle = '#e0402a'; ctx.fillText(bigText.tier, 0, 0);
+    ctx.font = 'bold 22px sans-serif'; ctx.strokeText(bigText.sub, 0, 30);
+    ctx.fillStyle = '#c47a00'; ctx.fillText(bigText.sub, 0, 30);
+    ctx.restore();
+  }
+}
+
+// ===== メインループ =====
+function loop(ts){
+  const dt = Math.min(0.05, (ts - last) / 1000 || 0);
+  last = ts;
+  if (running) update(dt);
+  draw();
+  requestAnimationFrame(loop);
+}
+makeChars();               // スタート画面の背景用にキャラを歩かせておく
+requestAnimationFrame(t => { last = t; loop(t); });
+// スタート前も歩かせる(スコア等は動かさない)
+setInterval(() => { if (!running) { clock += 0.016; for (const c of chars){ c.x += Math.cos(c.angle) * 0.6; c.y += Math.sin(c.angle) * 0.6;
+  if (c.x < CHAR_R || c.x > W - CHAR_R) c.angle = Math.PI - c.angle;
+  if (c.y < CHAR_R || c.y > H - CHAR_R) c.angle = -c.angle;
+  c.x = Math.max(CHAR_R, Math.min(W - CHAR_R, c.x)); c.y = Math.max(CHAR_R, Math.min(H - CHAR_R, c.y)); } } }, 16);
+</script>
+</body>
+</html>
